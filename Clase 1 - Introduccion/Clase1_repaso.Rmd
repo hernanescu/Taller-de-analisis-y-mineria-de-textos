@@ -1,0 +1,142 @@
+---
+title: "Taller de Análisis y Minería de Texto (CPS)"
+subtitle: "Clase 1 - Breve repaso del Tidyverse"
+author: "Hernán Escudero"
+date: "11/29/2019"
+output: radix::radix_article
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Empecemos con un repaso rápido de lo esencial del Tidyverse. Es una colección de paquetes craneadas por Hadley Wickham y su equipo, que buscan revitalizar un poco R (¡discusión larga!). 
+
+Lo que nos importa en esta instancia es refrescar cómo usábamos algunos verbos básicos, aplicándolo a un dataset. La pregunta que nos hacemos es: ¿cuántos establecimientos educativos según barrio, comuna y región (norte, centro, sur) en la Ciudad de Buenos Aires?
+
+Primero cargamos la librería.
+
+```{r}
+library(tidyverse)
+```
+
+Vamos a recordar las bondades de R (y otras herramientas de data science): datos en la nube. Para nuestra pregunta, un buen lugar al que recurrir es el portal de datos abiertos de la Ciudad de Buenos Aires.
+
+```{r}
+escuelas <- read_csv('http://cdn.buenosaires.gob.ar/datosabiertos/datasets/establecimientos-educativos/establecimientos-educativos.csv')
+```
+
+¿Qué podemos decir del dataset?
+
+```{r}
+head(escuelas)
+```
+
+```{r}
+summary(escuelas)
+```
+
+Tenemos muchísimas variables y no todas nos sirven. Para quedarnos con algunas, podemos hacerlo esencialmente de dos maneras: seleccionando una a una las columnas que queremos, o bien construyendo un vector con los nombres de las columnas y usarla como criterio de selección. 
+
+Aprovechemos también a recordar el arma secreta del tidyverse: el operador conocido como "pipe" (pronúnciese "páip", como en inglés, que se hace con %>%). Es básicamente un encadenador de operaciones: si fuera lengua escrita, podríamos entenderlo como "y luego". Veámoslo en un ejemplo concreto.
+
+```{r}
+variables_si <- c("dom_establ", "nombre_estab", "nivel", "comunas", "barrio", "areaprogra") #elijo quedarme con estas variables
+
+escuelas_filtro <- escuelas %>% 
+  select(variables_si)
+
+#Esto podemos leerlo como: agarrá el dataset escuelas, y luego seleccioname las variables que están en este vector.
+
+#Veamos también otra manera de invocar el método head: como consecuencia de un pipe. La forma de leerlo sería: agarrá el dataset escuela_filtro y después dame las primeras seis observaciones (head).
+
+escuelas_filtro %>% 
+  head()
+```
+
+¡Mucho más manejable! 
+
+Veamos ahora qué características tienen estas variables.
+
+```{r}
+str(escuelas_filtro)
+```
+
+Lo que nos interesa ver está después de los $, lo otro es información que en este momento no necesitamos. Prestemos atención a cómo vemos cada tipo de dato: la variable Comuna se nos presenta como numérica. Esto no es que sea un error, pero para algunas operaciones que haremos no nos sirve, tenemos que pasarla a categórica. 
+
+Una manera posible es mutarla y convertirla en factor. Para eso, tenemos unos de los verbos que más vamos a usar en R: el querido mutate. Con esto podemos no sólo modificar variables que ya tenemos, sino agregar nuevas a medida que lo necesitemos.
+
+```{r}
+escuelas_filtro <- escuelas_filtro %>% 
+  mutate(comunas = as.factor(comunas))
+```
+
+¿Funcionó?
+
+```{r}
+escuelas %>% 
+  select(comunas) %>% 
+  summary()
+```
+
+```{r}
+escuelas_filtro %>% 
+  select(comunas) %>% 
+  summary()
+```
+
+Habíamos dicho que queríamos también ver qué pasa en cada región, pero esa variable no está. Vamos a crearla, usando mutate en conjunción con case_when, que lo que hace es asignar un resultado en función de lo que nosotros le pidamos. La región del norte corresponde a las comunas 12, 13, 14 y 2; la del centro a las 5, 6, 7, 10, 11, 15, 1 y 3; y la del sur a las 8, 4 y 9.
+
+```{r}
+escuelas_filtro <- escuelas_filtro %>%
+  mutate(region=case_when(comunas %in% c("12","13","14","2") ~ "Norte",
+                          comunas %in% c("5", "6", "7", "10", "11", "15", "1", "3") ~ "Centro",
+                          comunas %in% c("8", "4", "9") ~ "Sur"))
+
+escuelas_filtro %>% 
+  head()
+```
+
+¡Perfecto! Antes de ver la respuesta a nuestra pregunta, refresquemos también otra función clave. Así como tenemos "select" que nos permite seleccionar variables, tenemos "filter" que nos permite filtrar observaciones según criterios que decidamos. 
+
+Como yo vivo en Villa Crespo voy a usar este barrio como ejemplo. Quiero ver cuántas escuelas de nivel inicial común hay en mi barrio, pero también en Almagro (porque me queda cerca de donde vivo): ¿cómo lo hago?
+
+```{r}
+escuelas_filtro %>% 
+  filter((barrio == 'VILLA CRESPO' | barrio == 'ALMAGRO') & nivel == 'Inicial Común')
+```
+
+Acá hay varias cosas a las que tenemos que prestar atención: los operadores booleanos (&, | ==) y las categorías case sensitive: no es lo mismo mayúsculas que minúsculas.
+
+Resulta que me molesta ver todas esas variables, y también me molestan esos nombres construidos. Quiero ver, de forma prolija, sólo los nombres y la dirección de esos colegios. ¿Cómo lo haríamos?
+
+```{r}
+escuelas_filtro %>% 
+  filter((barrio == 'VILLA CRESPO' | barrio == 'ALMAGRO') & nivel == 'Inicial Común') %>% 
+  select(nombre_estab, dom_establ) %>% 
+  rename('Nombre'=nombre_estab,
+         'Dirección'=dom_establ)
+```
+
+Para terminar, respondamos nuestra pregunta inicial con los últimos dos verbos que necesitamos: group_by y summarise. Esto nos permite agrupar las observaciones en función de alguna variable y obtener medidas de resumen. Empecemos entonces por comuna:
+
+```{r}
+escuelas_filtro %>% 
+  group_by(comunas) %>% 
+  summarise(total = n())
+```
+Es importante destacar que a partir de acá se pueden encadenar operaciones normalmente, como por ejemplo renombrar o crear variables a partir de esto.
+
+Con todo esto, ¡las últimas tareas quedan para ustedes!
+
+La consigna es la siguiente: a partir de escuelas_filtro:
+
+- Filtrar sólo alguna de las tres regiones.
+- Agrupar por barrio.
+- Hacer un conteo total.
+- Renombrar las variables "region" y "total" para que queden más linda.
+
+```{r}
+
+```
+

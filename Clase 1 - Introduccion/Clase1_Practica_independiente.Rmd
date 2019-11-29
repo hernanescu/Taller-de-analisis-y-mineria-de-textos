@@ -1,0 +1,42 @@
+---
+title: "Taller de Análisis y Minería de Texto (CPS)"
+subtitle: 'Clase 1 - Práctica independiente'
+author: "Hernán Escudero"
+date: "11/29/2019"
+output: radix::radix_article
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(tidyverse)
+library(tidytext)
+library(tm)
+library(proustr)
+```
+
+El objetivo acá es poner en práctica un poco todo lo que estuvimos aprendiendo y repasando. Para esto, a lo largo del taller vamos a trabajar con una base un poco más jugosa que la de Uruguay.
+
+En el dataset con el que vamos a trabajar de manera independiente, tenemos casi 140 mil tweets scrapeados al momento de las Elecciones PASO. Al tener más volumen de datos, podemos hacernos otra clase de preguntas... ¡que les tocará responder a ustedes!
+
+### Consignas
+
+1. No todas las columnas nos van a servir. Por una cuestión de comodidad, nos quedamos con las columnas text, screenName, favorited, favoriteCount, created, retweetCount y isRetweet.
+
+2. Crear una columna llamada "organico_popular". Los tweets que no sean retweets y tengan un conteo de favorito superior o igual a 50 tendrán el valor de 1, los otros un 0.
+
+3. Tenemos muchos tweets y no todos son del período que nos interesa. Hacer un filtro para quedarnos con los que están entre las 15 y las 23 del 12 de agosto. Atención: ¡la fecha está en UTC!
+
+4. Ahora sí, a divertirnos: empecemos viendo cuáles son las palabras más mencionadas en la base y en aquellos tweets que son orgánicos y populares. ¿Qué diferencias encontramos?
+
+5. ¿Quiénes fueron los usuarios más mencionados?
+
+6. ¿Cuáles fueron los hashtags más mencionados?
+
+7. ¿Cuáles fueron los bigramas más presentes?
+
+8. ¿Existen diferencias sustanciales en las palabras usadas entre las 15 y las 18.30 y las usadas entre las 20 y las 23?
+
+9. Desafío: ¿cuáles fueron los trigramas más presentes?

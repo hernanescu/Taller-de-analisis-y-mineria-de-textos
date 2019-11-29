@@ -1,0 +1,213 @@
+---
+title: "Taller de Análisis y Minería de Texto (CPS)"
+subtitle: 'Clase 1 - Práctica guiada'
+author: "Hernán Escudero"
+date: "11/29/2019"
+output: radix::radix_article
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(tidyverse)
+library(tidytext)
+library(tm)
+library(proustr)
+```
+
+En esta práctica guiada vamos a trabajar con un dataset reducido: son 18.000 tweets scrapeados al momento de las elecciones en Uruguay. Empecemos cargando el dataset, usando las herramientas que nos da Tidyverse.
+
+```{r}
+base <- read_csv('../Datasets/uruguay.csv')
+```
+
+¿De qué se trata la base?
+
+```{r}
+base %>% head()
+```
+
+```{r}
+base %>% str()
+```
+
+¡Tenemos mucho para empezar a indagar! Hagamos una primera tokenización por palabras.
+
+```{r}
+base %>% 
+    unnest_tokens(Palabra, text) %>%
+    count(Palabra, sort=TRUE) %>%
+    arrange(desc(n))
+```
+
+¡Un espanto total! Esto no nos sirve de nada, hay que depurar un poco más. ¿Recuerdan con qué lo hacíamos? 
+
+```{r}
+base %>% 
+    unnest_tokens(Palabra, text) %>%
+    count(Palabra, sort=TRUE) %>%
+    filter(!Palabra%in%stopwords('es'))%>%
+    arrange(desc(n))
+```
+
+Fíjense como ya nos sacamos de encima "la", "en", "el" y demás palabras que no nos aportan nada.
+
+A esta altura, todavía tenemos un montón de otras cosas: emojis, metadatos que no fueron bien interpretados, etc. Para estar segurxs de que estamos tomando sólo información relevante, pidámosle a R que elija sólo las palabras que empiecen con alguna letra, con un numeral (hashtag) o con una arroba.
+
+
+```{r}
+base %>% 
+    unnest_tokens(Palabra, text) %>%
+    count(Palabra, sort=TRUE) %>%
+    filter(!Palabra%in%stopwords('es')) %>%
+    filter(str_detect(Palabra, "^[a-zA-z]|^#|^@"))%>%
+    arrange(desc(n))
+```
+
+Si bien en el top 10 de palabras no aparece, podemos apreciar que pasamos de 8324 tokens a 7648.
+
+Así y todo, encontramos algunos términos como "rt", que no nos son útiles. Una buena forma de sacarnos el problema de encima es armar un vector con ciertos términos que sabemos que aparecen (o aquellos que no nos aportan mucho, como "tan") y eliminarlos.
+
+```{r}
+palabras_inutiles <- c('rt', 't.co', 'https', 'tan')
+
+base %>% 
+    unnest_tokens(Palabra, text) %>%
+    count(Palabra, sort=TRUE) %>%
+    filter(!Palabra%in%stopwords('es')) %>%
+    filter(!Palabra%in%palabras_inutiles) %>%
+    filter(str_detect(Palabra, "^[a-zA-z]|^#|^@"))%>%
+    arrange(desc(n))
+```
+
+Tenemos todas las palabras que empiezan con una letra, con un hashtag o una arroba. Veamos qué pasa cuando le pedimos a unnest_tokens que entienda específicamente que estamos lidiando con tweets.
+
+```{r}
+palabras_inutiles <- c('rt', 't.co', 'https', 'tan')
+
+base %>% 
+    unnest_tokens(Palabra, text, token='tweets') %>%
+    count(Palabra, sort=TRUE) %>%
+    filter(!Palabra%in%stopwords('es')) %>%
+    filter(!Palabra%in%palabras_inutiles) %>%
+    filter(str_detect(Palabra, "^[a-zA-z]|^#|^@"))%>%
+    arrange(desc(n))
+```
+
+Usemos lo que vimos sobre regex para ver más información: ¿cuáles fueron los hashtags más utilizados?
+
+```{r}
+palabras_inutiles <- c('rt', 't.co', 'https', 'tan')
+
+base %>% 
+    unnest_tokens(Palabra, text, token='tweets') %>%
+    count(Palabra, sort=TRUE) %>%
+    filter(!Palabra%in%stopwords('es')) %>%
+    filter(!Palabra%in%palabras_inutiles) %>%
+    filter(str_detect(Palabra, "^#"))%>%
+    arrange(desc(n))
+```
+
+¿... y los usuarios?
+
+```{r}
+palabras_inutiles <- c('rt', 't.co', 'https', 'tan')
+
+base %>% 
+    unnest_tokens(Palabra, text, token='tweets') %>%
+    count(Palabra, sort=TRUE) %>%
+    filter(!Palabra%in%stopwords('es')) %>%
+    filter(!Palabra%in%palabras_inutiles) %>%
+    filter(str_detect(Palabra, "^@"))%>%
+    arrange(desc(n))
+```
+
+Lo interesante de estas herramientas es que podemos combinarlas con todo lo que nos brinda el mundo del tidyverse: podemos filtrar, mutar, etc. Por supuesto que lo que podamos (¡y querramos!) hacer dependerá de lo que el dataset nos permita hacer. En este caso, por ejemplo, podríamos preguntarnos: ¿hay alguna diferencia en lo que aparece en los mensajes "naturales" (no retweets) y aquellos que no lo son?
+
+```{r}
+#los que son retweets
+base %>% 
+    filter(isRetweet==TRUE) %>% 
+    unnest_tokens(Palabra, text, token='tweets') %>%
+    count(Palabra, sort=TRUE) %>%
+    filter(!Palabra%in%stopwords('es')) %>%
+    filter(!Palabra%in%palabras_inutiles) %>%
+    filter(str_detect(Palabra, "^[a-zA-z]|^#|^@"))%>%
+    arrange(desc(n))
+```
+
+```{r}
+#los que no son retweets
+base %>% 
+    filter(isRetweet==FALSE) %>% 
+    unnest_tokens(Palabra, text, token='tweets') %>%
+    count(Palabra, sort=TRUE) %>%
+    filter(!Palabra%in%stopwords('es')) %>%
+    filter(!Palabra%in%palabras_inutiles) %>%
+    filter(str_detect(Palabra, "^[a-zA-z]|^#|^@"))%>%
+    arrange(desc(n))
+```
+
+Como vimos, la tokenización se puede hacer también en más de una palabra. Veamos por ejemplo lo que pasa con la construcción de bigramas.
+
+```{r}
+base %>% 
+    unnest_tokens(Palabra, text, token='ngrams', n = 2)
+```
+
+Vemos que tenemos cada tweet separado en sus respectivos bigramas. De una base de apenas 18.000 tweets pasamos a tener 354.000 observaciones: casi 20 veces más. No sólo no parece muy útil, sino que también tenemos que sacarnos mucha información innecesaria de encima. Para eso, Tidyverse viene a nuestro auxilio.
+
+En primer lugar, tenemos que encontrar una manera de mirar palabra por palabra qué sirve y qué no. Por suerte, tenemos separate, verbo con el que podemos partir los elementos, estableciendo un criterio delimitador: en nuestro caso, sería el espacio (podría suceder en algún caso que haya palabras unidas por un guión, por nombrar un ejemplo posible). Una vez que tenemos esto listo, para cada una de las palabras (que ya separamos en sus respectivas columnas), tenemos que ver qué nos sirve y qué no.
+
+```{r}
+base %>% 
+    unnest_tokens(Palabra, text, token='ngrams', n = 2) %>%
+    separate(Palabra, c('word1', 'word2'), sep=' ') %>% 
+    filter(!word1%in%stopwords('es')) %>% 
+    filter(!word2%in%stopwords('es')) %>% 
+    filter(!word1%in%palabras_inutiles) %>% 
+    filter(!word2%in%palabras_inutiles) %>% 
+    filter(str_detect(word1, "^[a-zA-z]|^#|^@")) %>%
+    filter(str_detect(word2, "^[a-zA-z]|^#|^@"))
+```
+
+¡Bastante mejor! Pasamos de las 350 mil observaciones a unas 93.000. Sin embargo esto todavía no nos dice absolutamente nada: sólo estamos en la etapa de tokenización (en nuestro caso, armado de bigramas) y limpieza. Hagamos el conteo de ocurrencias una pegada a la otra, usando a nuestro buen amigo count.
+
+```{r}
+base %>% 
+    unnest_tokens(Palabra, text, token='ngrams', n = 2) %>%
+    separate(Palabra, c('word1', 'word2'), sep=' ') %>% 
+    filter(!word1%in%stopwords('es')) %>% 
+    filter(!word2%in%stopwords('es')) %>% 
+    filter(!word1%in%palabras_inutiles) %>% 
+    filter(!word2%in%palabras_inutiles) %>% 
+    filter(str_detect(word1, "^[a-zA-z]|^#|^@")) %>%
+    filter(str_detect(word2, "^[a-zA-z]|^#|^@")) %>%
+    count(word1, word2, sort=TRUE)
+```
+
+Todo muy lindo, pero seguimos sin ver los bigramas: hasta acá, tenemos sólo palabras separadas. El último paso que nos queda es unir todo, para lo cual tenemos el apropiadamente llamado unite. 
+
+```{r}
+base %>% 
+    unnest_tokens(Palabra, text, token='ngrams', n = 2) %>%
+    separate(Palabra, c('word1', 'word2'), sep=' ') %>% 
+    filter(!word1%in%stopwords('es')) %>% 
+    filter(!word2%in%stopwords('es')) %>% 
+    filter(!word1%in%palabras_inutiles) %>% 
+    filter(!word2%in%palabras_inutiles) %>% 
+    filter(str_detect(word1, "^[a-zA-z]|^#|^@")) %>%
+    filter(str_detect(word2, "^[a-zA-z]|^#|^@")) %>%
+    count(word1, word2, sort=TRUE) %>%
+    unite(Palabra, word1, word2, sep=' ') %>% 
+    ungroup() %>%
+    arrange(desc(n)) %>% 
+    mutate(word=Palabra,
+           freq=n) %>% 
+    select(word, freq)
+```
+
+En el caso de este dataset, teniendo un candidato con un nombre compuesto, no debería sorprendernos mucho que su nombre figura al tope. Es importante notar que para hacer n-gramas necesitamos pasarles ese argumento a la tokenización. En ese sentido, vemos que en el 10mo puesto aparece "pou luislacallepou": podemos suponer que será la segunda parte del apellido, seguido de su nombre de usuario. 
+
