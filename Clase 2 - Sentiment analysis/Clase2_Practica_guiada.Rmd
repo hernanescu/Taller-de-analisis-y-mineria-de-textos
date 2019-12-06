@@ -1,0 +1,475 @@
+---
+title: "Taller de Análisis y Minería de Texto (CPS)"
+subtitle: "Clase 2 - Sentiment analysis: SDAL y NRC - Práctica guiada"
+author: "Hernán Escudero"
+date: "12/6/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Sentiment analysis: SDAL
+
+Vamos a empezar con sentiment analysis. Primero que nada, cargamos las librerías (son cada vez más) y la base.
+
+```{r}
+library(tidyverse)
+library(tidytext)
+library(tm)
+library(proustr)
+library(syuzhet)
+library(SnowballC)
+library(ggwordcloud)
+```
+
+```{r}
+base <- read_csv('../Datasets/uruguay.csv')
+```
+
+Arranquemos con el método basado en el lexicón SDAL, y el punto de partida es levantar la base. Como les comenté, el lexicón está disponible online pero sugiero que lo levanten de mi GitHub que yo ya lo estuve preprocesando para que nos sea más fácil (es el que yo mismo uso en mis análisis). 
+
+```{r}
+sdal <- read.csv('https://hernanescu.github.io/data/SDAL_2.csv', encoding = 'UTF-8') %>% 
+  rename('word'=palabra) #esto lo hago por un tema de buenas prácticas y wordcloud
+```
+
+Presten atención al encoding. Para que vean cuán habitual es esto, al momento de preparar este ejercicio lo levanté y me cargó mal, y con sólo recordarle a R de qué codificación hablamos todo tomó mucho más sentido. Veamos un poquito el lexicón.
+
+```{r}
+sdal %>% head()
+```
+Vemos que tenemos las palabras según su agrado, activación e imaginabilidad, repartido en media y desvío estándar. Nos concentraremos en la media.
+
+Otra ventaja de esta versión es que entre las tareas de procesamiento que le hice, crucé las conjugaciones verbales de cada uno de los verbos existentes en el dataset.
+
+```{r}
+table(sdal$tipo)
+```
+
+No es que existan 37 mil verbos: son las conjugaciones distintas de los que están en el lexicón original. ¡Un trabajo menos que tenemos que hacer!
+
+Volviendo a la base, dado que ya sabemos de que se trata todo no vamos a explorar. Como siempre, el camino de la ciencia de datos está plagado de decisiones teórico-metodológicas, y esta no será una excepción: vamos a tokenizar por palabra (o sea, no con el método tweet) y quitando hashtags y nombres de usuario. 
+
+Mientras que lo último es obvio (no hay mucho sentimiento en @usuario), no es lo mismo en el primer punto: podríamos estar perdiendo hashtags con contenido (#malo, por poner un ejemplo de juguete). Lo que me lleva a eliminarlos es que los hashtags comprensibles en una sola palabra, como el ejemplo de recién, son mucho menores a hashtags con palabras compuestas (#EleccionesUruguay, digamos). 
+
+
+```{r}
+palabras_inutiles <- c('rt', 't.co', 'https', 'tan')
+
+base %>% 
+    unnest_tokens(Palabra, text) %>%
+    count(Palabra, sort=TRUE) %>%
+    filter(!Palabra%in%stopwords('es')) %>%
+    filter(!Palabra%in%palabras_inutiles) %>%
+    filter(str_detect(Palabra, "^[a-zA-z]|^#|^@"))%>%
+    arrange(desc(n))
+```
+
+Claro está que esto así no nos sirve, así que la guardamos en un objeto con el que trabajaremos.
+
+```{r}
+base_token <- base %>% 
+    unnest_tokens(Palabra, text) %>%
+    count(Palabra, sort=TRUE) %>%
+    filter(!Palabra%in%stopwords('es')) %>%
+    filter(!Palabra%in%palabras_inutiles) %>%
+    filter(str_detect(Palabra, "^[a-zA-z]|^#|^@"))%>%
+    arrange(desc(n))
+```
+
+Entre las muchas funciones que nos provee Tidyverse está el mundo de los joins: left, right, inner, anti, etc. Tienen una sintaxis parecida a SQL (las malas lenguas dirán robada) así que quienes tengan experiencia en ese lenguaje lo podrán manejar sin problemas. Por lo pronto, usaremos left_join: le vamos a pedir a R que a la base que tenemos en la parte izquierda de la operación le agregue las cosas que existen en la derecha.
+
+Como antes le habíamos puesto "Palabra" a la parte de los tokens, vamos a renombrarla para que sea fácil interpretar a partir de qué columna tiene que pegarle la información.
+
+```{r}
+base_token <- base_token %>% 
+  rename('word'=Palabra)
+
+base_token_sdal <- left_join(base_token, sdal)
+```
+
+¿Qué tenemos ahora...?
+
+```{r}
+base_token_sdal %>% head()
+```
+
+... tenemos un dataset lleno de missings. La respuesta es clara: no todo lo que está tokenizado tiene su correlato en el lexicón. Para quedarnos con sólo lo que podemos usar, vamos a eliminar todo aquello que tenga datos en la columna media_agrado. De más está decir que podemos también operar sobre activación e imaginabilidad (pero no lo haremos en esta oportunidad, y con una mano en el corazón, yo jamás lo hice).
+
+```{r}
+base_token_sdal <- base_token_sdal %>% #vamos a sobreescribir la base
+  filter(!is.na(media_agrado)) %>%
+  arrange(desc(media_agrado))
+```
+
+Fíjense lo que hicimos con el filtro: le pedimos a R que nos diga cuáles sí son NA (is.na), pero luego le antepusimos la negación (!). De esta forma, lo que hacemos es identificar aquellos que no son missings. ¡Suena mucho más confuso de lo que es!
+
+Con arrange vamos a ordenar a partir de la variable media_agrado. Esto va a ser súper relevante para nuestra tarea, dado que el lexicón va de 1 a 3, donde 1 es negativo y 3 es positivo. 
+
+```{r}
+base_token_sdal %>% 
+  head()
+```
+
+Fíjense cómo al ordenar de este modo tenemos las palabras más positivas...
+
+```{r}
+base_token_sdal %>% 
+  arrange(media_agrado) %>% 
+  .[1:20,]
+```
+
+... y de esta forma las más negativas. Aquí vemos uno de los problemas más frecuentes con el que nos podemos encontrar: la repetición al extremo de conjugaciones verbales. Aquí no hay recetas únicas sobre cómo lidiar con ellos. 
+
+Por las propias falencias del stemming/lemmatizing en español, al tratar con volúmenes gigantes siempre se va a perder información. Por eso, el método que les propongo en este caso es una tarea mucho más artesanal: hacer una suma de los elementos iguales y quedarnos con sólo un top, que es el que usaremos para graficar.
+
+Los gráficos que vamos a hacer van a tomar las primeras 20 palabras (por eso el corte previo). Pero al ver la cantidad de repeticiones, vamos a estirarnos un poco más. Nos vamos a quedar con las 50 del top negativo y 50 del top positivo, y a partir de eso vamos a operar.
+
+```{r}
+token_neg <- base_token_sdal %>% 
+  arrange(media_agrado) %>% 
+  .[1:50,]
+
+token_pos <-base_token_sdal %>% 
+  arrange(desc(media_agrado)) %>% 
+  .[1:50,] 
+```
+
+Vamos a empezar por el negativo. Lo que tenemos que hacer es sumar, de una forma casera y usando nuestra capacidad de razonar como seres humanos, qué es lo que debería agruparse para perder la menor cantidad de información posible. Vemos que "perder" y sus derivados aparecen unas cuantas veces, cosa que también sucede con otras palabras. El caso de odio (y algunos otros similares) es un poco distinto porque fue contado dos veces: como sustantivo y como verbo. ¡Hay que estar atentxs a eso!
+
+```{r}
+token_neg %>% 
+  mutate(n=case_when(word=='pierde'~524,
+                     TRUE~as.numeric(n)))
+```
+
+Tenemos la suma hecha, ahora sólo resta sacar las repeticiones usando algunos filtros.
+
+```{r}
+token_neg %>% 
+  mutate(n=case_when(word=='pierde'~532,
+                     TRUE~as.numeric(n))) %>% 
+  filter(!word%in%c('perdiendo', 'pierden', 'perder', 'perdido', 'perdió', 'perdería', 'pierdas', 'perdiste'))
+```
+
+Seguimos con matar y obligar:
+
+```{r}
+token_neg %>% 
+  mutate(n=case_when(word=='pierde'~537,
+                     TRUE~as.numeric(n))) %>% 
+  filter(!word%in%c('perdiendo', 'pierden', 'perder', 'perdido', 'perdió', 'perdería', 'pierdas', 'perdiste', 'perdieron')) %>% 
+  mutate(n=case_when(word=='mate'~79,
+                     TRUE~as.numeric(n))) %>% 
+  filter(!word%in%c('matamos', 'matar'))%>% 
+  mutate(n=case_when(word=='obliga'~9,
+                     TRUE~as.numeric(n))) %>% 
+  filter(!word%in%c('obligan')) 
+```
+
+El último paso que nos queda es limpiar los duplicados.
+
+```{r}
+token_neg %>% 
+  mutate(n=case_when(word=='pierde'~537,
+                     TRUE~as.numeric(n))) %>% 
+  filter(!word%in%c('perdiendo', 'pierden', 'perder', 'perdido', 'perdió', 'perdería', 'pierdas', 'perdiste', 'perdieron')) %>% 
+  mutate(n=case_when(word=='mate'~79,
+                     TRUE~as.numeric(n))) %>% 
+  filter(!word%in%c('matamos', 'matar')) %>% 
+  mutate(n=case_when(word=='obliga'~9,
+                     TRUE~as.numeric(n))) %>% 
+  filter(!word%in%c('obligan')) %>% 
+  distinct(.$word, .keep_all = TRUE)
+```
+
+¿Qué pasó con el décimo elemento? Fíjense la peculiaridad de trabajar con el lenguaje, el tilde y todas las sutilezas de un idioma tan florido como el español: alguien no puso la tilde en "tenía", con lo que quedó como "tenia", el gusano. ¡Díganme si no es bellísimo! Saquémoslo de ahí.
+
+```{r}
+token_neg %>% 
+  mutate(n=case_when(word=='pierde'~537,
+                     TRUE~as.numeric(n))) %>% 
+  filter(!word%in%c('perdiendo', 'pierden', 'perder', 'perdido', 'perdió', 'perdería', 'pierdas', 'perdiste', 'perdieron')) %>% 
+  mutate(n=case_when(word=='mate'~79,
+                     TRUE~as.numeric(n))) %>% 
+  filter(!word%in%c('matamos', 'matar')) %>% 
+  mutate(n=case_when(word=='obliga'~9,
+                     TRUE~as.numeric(n))) %>% 
+  filter(!word%in%c('obligan')) %>% 
+  distinct(.$word, .keep_all = TRUE) %>% 
+  filter(word!='tenia')
+```
+
+¡Finalmente lo logramos! Quedémonos con esto convirtiéndolo en un objeto, y quedémonos sólo con las variables que vamos a usar por una cuestión de brevedad.
+
+```{r}
+token_neg_clean <- token_neg %>% 
+  mutate(n=case_when(word=='pierde'~537,
+                     TRUE~as.numeric(n))) %>% 
+  filter(!word%in%c('perdiendo', 'pierden', 'perder', 'perdido', 'perdió', 'perdería', 'pierdas', 'perdiste', 'perdieron')) %>% 
+  mutate(n=case_when(word=='mate'~79,
+                     TRUE~as.numeric(n))) %>% 
+  filter(!word%in%c('matamos', 'matar')) %>% 
+  mutate(n=case_when(word=='obliga'~9,
+                     TRUE~as.numeric(n))) %>% 
+  filter(!word%in%c('obligan')) %>% 
+  distinct(.$word, .keep_all = TRUE) %>% 
+  filter(word!='tenia') %>% 
+  select(word, n, media_agrado)
+```
+
+Una forma muy simpática de graficar esto es con los lollipops. ¡Armemos uno!
+
+En el contexto de los .rmd, es muy ameno armar todo encadenando operaciones, así que usemos esa metodología: partiendo de la base iremos apilando capas y operaciones.
+
+```{r}
+token_neg_clean %>% #partimos de la base
+  .[1:20,] %>% #tomamos los primeros 20 casos
+  ggplot(., aes(x=word, y=n))+ #indicamos la base y los ejes
+  geom_segment(aes(x=word, xend=word, y=0, yend=n), color="grey")+ #esta es la primera capa: el segmento
+  geom_point(size=3, color="darkred")+ #segunda capa: el punto
+  coord_flip()+ #damos vuelta los ejes
+  theme(
+      panel.grid.minor.y = element_blank(), #detalles estéticos
+      panel.grid.major.y = element_blank(),
+      legend.position="none") +
+    xlab("") +
+    ylab("Frecuencia")+
+  labs(title='Elecciones en Uruguay: las 20 palabras más negativas por frecuencia')
+```
+No está mal, pero podría estar mejor, ¿verdad? Por más que hayamos ordenado de manera descendente, la asociación entre variables tiene que ser declarada de manera explícita creando otra variable donde se indique la relación. Además, vemos que "pierde" es un outlier increíble que nos nubla la posibilidad de ver. Ordenemos bien todo y saquemos ese valor tan extremo.
+
+```{r}
+token_neg_clean %>%
+  .[2:21,] %>% #tomamos los primeros 20 casos excluyendo el primero 
+  mutate(word2=fct_reorder(word, n)) %>% #creamos una nueva variable ordenada
+  ggplot(., aes(x=word2, y=n))+ #usamos la variable ordenada para los gráficos
+  geom_segment(aes(x=word2, xend=word2, y=0, yend=n), color="grey")+
+  geom_point(size=3, color="darkred")+
+  coord_flip()+
+  theme(
+      panel.grid.minor.y = element_blank(),
+      panel.grid.major.y = element_blank(),
+      legend.position="none") +
+    xlab("") +
+    ylab("Frecuencia")+
+  labs(title='Elecciones en Uruguay: las 20 palabras más negativas por frecuencia')
+```
+
+¡Bastante mejor! Pero saquemos también los derivados de matar para tener una visión un poco más general.
+
+```{r}
+token_neg_clean %>%
+  .[3:22,] %>% #tomamos los primeros 20 casos excluyendo el primero y segundo
+  mutate(word2=fct_reorder(word, n)) %>%
+  ggplot(., aes(x=word2, y=n))+
+  geom_segment(aes(x=word2, xend=word2, y=0, yend=n), color="grey")+
+  geom_point(size=3, color="darkred")+
+  coord_flip()+
+  theme(
+      panel.grid.minor.y = element_blank(),
+      panel.grid.major.y = element_blank(),
+      legend.position="none") +
+    xlab("") +
+    ylab("Frecuencia")+
+  labs(title='Elecciones en Uruguay: las 20 palabras más negativas por frecuencia')
+```
+Por una cuestión de reparto de los datos, R decidió separar el eje y (recordemos que están invertidos los ejes) en decimales. ¿Queda feo, no? Arreglemos eso, y ya que estamos, démosle el toque final poniendo más información en las leyendas de los gráficos.
+
+```{r}
+token_neg_clean %>%
+  .[3:22,] %>% #tomamos los primeros 20 casos excluyendo el primero 
+  mutate(word2=fct_reorder(word, n)) %>% #creamos una nueva variable ordenada
+  ggplot(., aes(x=word, y=n))+
+  geom_segment(aes(x=word2, xend=word2, y=0, yend=n), color="grey")+
+  geom_point(size=3, color="darkred")+
+  coord_flip()+
+  theme(
+      panel.grid.minor.y = element_blank(),
+      panel.grid.major.y = element_blank(),
+      legend.position="none") +
+    xlab("") +
+    ylab("Frecuencia")+
+  scale_y_continuous(breaks=c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12), labels=c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12))+
+  labs(title='Elecciones en Uruguay: las 20 palabras más negativas por frecuencia',
+       subtitle = 'Clase 2 del taller de Análisis de texto en el CPS',
+       caption = 'Fuente: Twitter')
+```
+
+¡Perfecto! En este caso es importante tener en cuenta que estamos lidiando con las palabras peor puntuadas (o sea, las más negativas de todas) y ordenadas según su frecuencia. Es decir: va de suyo que existen palabras más mencionadas, pero no son tan negativas como estas, según la puntuación del lexicón SDAL. 
+
+¡Ahora les toca a ustedes! Usando todo lo visto, hagan la misma tarea con las palabras positivas (recuerden que tienen la base token_pos, y el trabajo que van a tener que hacer de agrupar palabras no va a ser tan complejo como este ;) ).
+
+### Mini práctica independiente: lollipop de palabras positivas
+
+
+### Wordcloud por SDAL
+
+Antes de pasar a la última técnica del día, vamos a usar el SDAL para mezclarlo con una nube de palabras. Para esto necesitamos el paquete ggwordcloud (no confundir con wordcloud, que es el más usado). La ventaja que tiene este paquete es que tiene la misma lógica que Ggplot, y entre las posibilidades que nos da, podemos asignar variables a distintos elementos del gráfico. Por ejemplo, podemos asignar que el color de la palabra en cuestión se deba a una variable... y es exactamente lo que haremos.
+
+Para esto vamos a usar la base de tokens totales. En el camino, vamos a agregar una variable más para darle un poquito más de onda: "angle", que usaremos para rotar algunas palabras al azar. ¡Atención! Este gráfico puede demorar unos instantes.
+
+```{r}
+base_token_sdal %>% 
+  mutate(angle = 45 * sample(-2:2, n(), replace = TRUE, prob = c(1, 1, 4, 1, 1))) %>% #variable nueva
+  ggplot(., aes(label=word, size=n, color = media_agrado, angle = angle))+ #cuatro parámetros!
+  geom_text_wordcloud_area(rm_outside = TRUE)+ #una de las dos formas de usar la librería
+  scale_color_gradient(low="#c90000", high="#009A44")+ #escalas de color
+  scale_size_area(max_size = 16)+ #tamaños máximos
+  theme_minimal()+ #forma minimalista
+  labs(title='Wordcloud: Elecciones Uruguay',
+       subtitle='Clase 2 del Taller de Análisis de Texto del CPS',
+       caption='Fuente: Twitter')
+```
+La selección de los parámetros no es tan sencilla: hay que hacer muchas pruebas hasta encontrar alguna configuración que tenga sentido para los datos con los que disponemos, el tamaño del lienzo, etc. Hay varias cosas importantes a tener en cuenta:
+
+- Los resultados son aleatorios: cada unx de ustedes verá algo distinto al momento de ejecutar el código.
+- El gradiente de color va de un rojo (negativo) a verde (positivo).
+- El hiperparámetro más importante acá es el tamaño máximo. Sugiero enfáticamente ir a la documentación para ver todo lo que se puede modificar (que no son pocas cosas).
+- La variable de ángulo es absolutamente opcional y estética (como muchos de estos). Si no se busca hacer un cruce con SDAL, probablemente sea mejor usar directamente la librería wordcloud.
+
+## Sentiment analysis con NRC
+
+La librería syuzhet es muy interesante para trabajar con NLP por la interfaz que tiene con distintos diccionarios. En este caso, tenemos que usar algunas técnicas de preprocesamiento con regex para limpiar un poco los temas. Esto nos va a servir de puntapié para cosas que vamos a ver la próxima semana (librería qdap para nubes de comparación, por ejemplo). 
+
+¡Abróchense los cinturones porque esto viene picante! Primero, hay que agarrar los elementos de texto y convertirlos en un vector. Sobre ese vector, lo que vamos a hacer es sacarle los elementos que no nos sirvan como http, arrobas, hashtags, signos de puntuación, números, etc.
+
+```{r}
+base_text <- gsub("http.*","",base$text)
+base_text <- gsub("https.*","",base_text)
+  
+base_text <- gsub("#\\w+","",base_text)
+base_text <- gsub("@\\w+","",base_text)
+  
+  
+base_text <- gsub("[[:punct:]]","",base_text)
+base_text <- gsub("\\w*[0-9]+\\w*\\s*", "",base_text)
+```
+
+Así se veía el original...
+
+```{r}
+base_text_orig <- base$text
+head(base_text_orig)
+```
+
+... así se ve ahora.
+
+```{r}
+base_text %>% head()
+```
+Sigamos limpiando: sacamos rt y esos caracteres de escape.
+
+```{r}
+base_text2 <- gsub("rt ", "", base_text)
+base_text2 <- gsub("RT ", "", base_text2)
+base_text2 <- gsub("\n", "", base_text2)
+head(base_text2)
+```
+
+Podríamos seguir limpiando un poco (sacar espacios, bajar mayúsculas), pero con lo que tenemos deberíamos estar bien. Vamos a usar la función get_nrc_sentiment del paquete syuzhet, pasándole este vector de caracteres y diciéndole qué idioma es. ¡Atención! Este paso puede demorar un rato.
+
+```{r}
+nrc_data <- get_nrc_sentiment(char_v = base_text2, language = 'spanish')
+```
+
+En mi compu, al momento de armar el ejercicio, tardó aproximadamente dos minutos. ¿Cuál fue el resultado?
+
+```{r}
+nrc_data %>% head()
+```
+
+Vemos que para cada uno de los tweets, el algoritmo puntuó en función de lo que encontró. Es notable que al menos en el caso del inglés no puntuó nada: se dio cuenta de que era otro idioma y no hizo nada con eso.
+
+Con esto podemos hacer algunas cosas divertidas: podemos, por ejemplo, construir una máscara con la cual cortar el dataset original. Supongamos que queremos ver cuáles son los tweets que más miedo generan. En este caso, podemos construir la máscara "miedo" donde tome los valores en los cuales miedo sea mayor a 2 (o sea, 3). Esto lo escribí así y no igual a 3 por la única razón de que fui jugando con los valores (por ejemplo, mayor a 1, tomando 2 y 3). Consideren, igualmente, que la suma del máximo total dependerá de la longitud del documento. ¡Estas máscaras son muy útiles!
+
+Con el resultado alojado en el objeto "miedo", lo usamos para hacer un subset de la base original
+
+```{r}
+miedo <- which(nrc_data$fear>2)
+base_text_orig[miedo]
+```
+Un detalle curioso: sí entendió algo del tweet en italiano (rara la cantidad de tweets en otros idiomas, ¿no?). Segundo, también podemos ver que hay una cantidad de retweets importantes. Esto sin duda va a afectar el resultado final (o por lo pronto, es una variable que considerar).
+
+¿Podemos combinar distintos sentimientos?
+
+```{r}
+miedo_disgusto <- which(nrc_data$fear>2 & nrc_data$disgust>2)
+base_text_orig[miedo_disgusto]
+```
+
+¡Claro que podemos! Y es una buena manera de ir viendo tendencias y ajustar mejor nuestra lectura. Pero sigamos adelante: tenemos la posibilidad de ver todos estos sentimientos y emociones de un solo vistazo. Para eso tenemos que preprocesar un poco.
+
+Primero, renombremos todo al castellano, y armemos un objeto de tipo dataframe, transponiendo la matriz.
+
+```{r}
+nrc_data <- nrc_data %>% 
+  rename('anticipación'=anticipation,
+           'ira'=anger,
+           'disgusto'=disgust,
+           'miedo'=fear,
+           'alegría'=joy,
+           'tristeza'=sadness,
+           'sorpresa'=surprise,
+           'confianza'=trust,
+           'negativa'=negative,
+           'positiva'=positive)
+
+base_emocion <- data.frame(t(nrc_data))
+head(base_emocion)
+```
+Esta transposición es el primer paso, pero así como está no nos dice mucho. Lo que tenemos que hacer ahora es sumar todas las filas, colapsando toda la información.
+
+```{r}
+base_emocion <- data.frame(rowSums(base_emocion))
+head(base_emocion)
+```
+Ahora sí vemos todo lo que hay, pero todavía no nos sirve mucho: las categorías del sentimiento están metidos en los index, y el nombre del conteo es, cuanto menos, poco útil.
+
+```{r}
+names(base_emocion)[1] <- "cuenta"
+base_emocion <- cbind('sentimiento'=rownames(base_emocion), base_emocion)
+head(base_emocion)
+```
+
+¡Ya casi estamos! Solo resta sacarle los nombres a los index.
+
+```{r}
+rownames(base_emocion) <- NULL
+head(base_emocion)
+```
+
+¡Costó pero se pudo! Hagamos un gráfico de columnas con la información que tenemos.
+
+```{r}
+ggplot(base_emocion[1:8,], aes(x = sentimiento, y = cuenta, fill = sentimiento)) + 
+  geom_bar(stat = "identity") +
+  labs(title='Elecciones Uruguay - Sentiment Analysis (NRC)',
+       subtitle = 'Clase 2 del Taller de Análisis de Texto del CPS',
+       caption='Fuente: Twitter',
+       x = "Sentimiento", 
+       y = "Frecuencia") +
+  geom_text(aes(label = cuenta),
+            vjust = 1.5, color = "black",
+            size = 5)+
+  theme_minimal()
+```
+
+No está mal... ¡pero podría estar mejor! Tenemos valores absolutos. Sería mucho más cómodo verlo en valores relativos (porcentuales). Por suerte, R en eso nos tira un centro: no hace falta que operemos sobre la base antes de gráficar, sino que podemos hacerlo mientras graficamos. Veamos como:
+
+```{r}
+ggplot(base_emocion[1:8,], aes(x = sentimiento, y = round(cuenta/sum(cuenta)*100, 1), fill = sentimiento)) + 
+  geom_bar(stat = "identity") +
+  labs(title='Elecciones Uruguay - Sentiment Analysis (NRC)',
+       subtitle = 'Clase 2 del Taller de Análisis de Texto del CPS',
+       caption='Fuente: Twitter',
+       x = "Sentimiento", 
+       y = "Frecuencia") +
+  geom_text(aes(label = paste(round(cuenta/sum(cuenta)*100, 1), '%')),
+            vjust = 1.5, color = "black",
+            size = 5)
+```
+
+Noten que fuimos operando dentro del armado mismo del gráfico para tener la traducción de absolutos a porcentajes. Esto es de suma utilidad.

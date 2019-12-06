@@ -1,0 +1,29 @@
+---
+title: "Taller de Análisis y Minería de Texto (CPS)"
+subtitle: "Clase 2 - Sentiment analysis: SDAL y NRC - Práctica independiente"
+author: "Hernán Escudero"
+date: "12/6/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Como siempre, el objetivo ahora es poner en práctica todo lo que vimos hoy en el dataset de las Elecciones PASO.
+
+### Consignas
+
+1. Volver a construir el dataset tal y como estaba antes: con la columna "organico_popular", filtrado por fechas, etc.
+
+2. Hacer gráficos de lollipop positivos y negativos usando SDAL para la base total y para la base de organico_popular. Prestar atención a la correcta selección de los colores y a las etiquetas. 
+
+3. Hacer una nube de palabras con SDAL sólo con la base general (si quieren hacer con la de organico_popular genial, pero no creo que sea tan voluminosa).
+
+4. Preparar la base de datos para pasarla por el algoritmo de NRC.
+
+DESAFÍO BONUS (buena práctica): construir una función que cuyo insumo sea la base ya procesada por NRC y nos devuelva la base como la necesitamos para los gráficos (filas con sentimientos y emociones y sus conteos).
+
+5. Armar un gráfico de columnas con los ocho sentimientos: prestar atención a los nombres, la presentación y el formato porcentual.
+
+6. Las medidas polares de positividad y negatividad están en las columnas 9 y 10: hacer el mismo gráfico de columnas con esas.

@@ -1,0 +1,120 @@
+---
+title: "Taller de Análisis y Minería de Texto (CPS)"
+subtitle: "Clase 2 - Breve repaso del Ggplot2"
+author: "Hernán Escudero"
+date: "12/6/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Vamos a hacer un repaso a toda marcha de lo esencial de ggplot2, el paquete para graficar por excelencia. Hay otros, pero este es muy ampliamente el más usado. Es parte de la suite Tidyverse y tiene una excelente compatibilidad con la estructura que se propone, con una diferencia clave: en vez de hacer "y luego" con %>%, lo que tenemos que hacer es apilar capas sobre capas con el +.
+
+Arranquemos como siempre cargando a nuestro fiel Tidyverse.
+
+```{r}
+library(tidyverse)
+```
+
+Para este trabajo básico, vamos a trabajar nuevamente con el dataset de escuelas.
+
+```{r}
+escuelas <- read_csv('http://cdn.buenosaires.gob.ar/datosabiertos/datasets/establecimientos-educativos/establecimientos-educativos.csv')
+```
+
+Recordemos brevemente de qué se trataba.
+
+```{r}
+head(escuelas)
+```
+
+Vamos a rearmar el dataset tal y como estaba antes a toda marcha.
+
+```{r}
+variables_si <- c("dom_establ", "nombre_estab", "nivel", "comunas", "barrio", "areaprogra")
+
+escuelas_filtro <- escuelas %>% 
+  select(variables_si) %>% 
+  mutate(comunas = as.factor(comunas),
+         region=case_when(comunas %in% c("12","13","14","2") ~ "Norte",
+                          comunas %in% c("5", "6", "7", "10", "11", "15", "1", "3") ~ "Centro",
+                          comunas %in% c("8", "4", "9") ~ "Sur"))
+
+escuelas_filtro %>% head()
+```
+
+¡Mucho mejor! Hagamos un agrupamiento por comunas y por barrio para tener de vuelta la cantidad de establecimientos.
+
+```{r}
+escuelas_filtro %>% 
+  group_by(comunas, barrio) %>% 
+  summarise(total = n())
+```
+
+Guardemos el objeto para poder trabajarlo (aunque después veremos una alternativa ;) )
+
+```{r}
+escuelas_comunas <- escuelas_filtro %>% 
+  group_by(comunas, barrio) %>% 
+  summarise(total = n())
+```
+
+La forma en la que trabaja Ggplot es apilando capas, donde podemos decir a cada una qué es lo que le corresponde en los parámetros estéticos. Veamos un ejemplo sencillo:
+
+```{r}
+ggplot(data = escuelas_comunas)+ #indicamos el dataset
+  geom_col(aes(x=comunas, y=total)) #en el tipo de gráfico, le decimos qué es lo que queremos
+```
+
+Empieza a tomar forma, pero podría quedar un poco más copado. Veamos qué pasa si le damos a R la opción de llenar las columnas según el barrio.
+
+```{r}
+escuelas_filtro %>% 
+  group_by(comunas, barrio) %>% 
+  summarise(total = n()) %>% 
+  ggplot(.)+
+  geom_col(aes(x=comunas, y=total, fill=barrio))
+```
+
+¿Algunx prestó atención al código? Esa era la otra forma: usando Tidyverse podemos encadenar distintas operaciones on the fly, y graficar de acuerdo a lo que vayamos necesitando. Esto es especialmente útil trabajando con el formato markdown.
+
+Vemos que va queriendo, pero podríamos agregar coord_flip para dar vuelta los ejes.
+
+```{r}
+escuelas_filtro %>% 
+  group_by(comunas, barrio) %>% 
+  summarise(total = n()) %>% 
+  ggplot(.)+
+  geom_col(aes(x=comunas, y=total, fill=barrio))+
+  coord_flip()
+```
+
+Por último, podemos también modificar un poco las etiquetas para que quede más presentable.
+
+```{r}
+escuelas_filtro %>% 
+  group_by(comunas, barrio) %>% 
+  summarise(total = n()) %>% 
+  ggplot(.)+
+  geom_col(aes(x=comunas, y=total, fill=barrio))+
+  coord_flip()+
+  labs(title = 'Establecimientos educativos en CABA',
+       subtitle = '2862 registros',
+       fill = 'Barrios',
+       caption = 'Fuente: Datos abiertos del GCBA',
+       x='Comunas',
+       y='Cantidad')
+```
+
+Hay muchos (pero MUCHOS) tipos distintos de gráficos. No vamos a repasar todos porque no tiene sentido, pero la estructura en líneas generales es la misma. Lo importante es tener presente dónde estamos poniendo los valores que queremos observar.
+
+A modo de ejercicio, la tarea que tienen es:
+- Filtrar sólo las regiones norte y sur.
+- A partir de eso, hacer un gráfico de columnas stackeado por barrios para ver la cantidad de establecimientos.
+- Dejarlo prolijo!
+
+```{r}
+
+```
+
