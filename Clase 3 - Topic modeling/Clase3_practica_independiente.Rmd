@@ -1,0 +1,20 @@
+---
+title: "Taller de Análisis y Minería de Texto (CPS)"
+subtitle: "Clase 3 - Topic modeling - Práctica independiente"
+date: "12/12/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Una vez más, el objetivo es poner en práctica todo lo que vimos, pero de una manera mucho más integral.
+
+### Consignas
+
+1. El hashtag levantado es "ideológicamente agnóstico". ¿Podremos encontrar la grieta? (o sea: LDA con K=2). ¿Qué encontramos?
+
+2. A cada uno de los grupos aplicarle sentiment analysis (NRC y SDAL).
+
+3. Probar un LDA con otros valores de K (3, 4, 5) para ver si se detecta otra clase de tópicos emergentes.

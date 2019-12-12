@@ -1,0 +1,322 @@
+---
+title: "Taller de Análisis y Minería de Texto (CPS)"
+subtitle: "Clase 3 - Topic modeling - Práctica guiada"
+date: "12/12/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Como siempre, arrancamos cargando las librerías.
+
+```{r, echo=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidytext)
+library(tm)
+library(proustr)
+library(syuzhet)
+library(SnowballC)
+library(topicmodels)
+library(RVerbalExpressions)
+```
+
+Cargamos la base de Uruguay (y creamos el vector de palabras, ya que estamos).
+
+```{r, echo=FALSE, warning=FALSE}
+base <- read_csv('../Datasets/uruguay.csv')
+palabras_inutiles <- c('rt', 't.co', 'https', 'tan')
+```
+
+El flujo de trabajo va a ser un poco distinto, porque lo que queremos hacer es crear grupos de pertenencia a los tweets pero sin perder la información de toda la base (creados, favoritos, retweets, etc.). A medida que vas filtrando componenetes y limpiando la base no sólo vas a perder información que no sirve (que es lo que buscamos), sino que también vas a perder documentos enteros: esta distinción es muy importante al momento de usar el modelo como clasificador de la base.
+
+```{r}
+#primero hacemos la misma limpieza que hicimos antes, pero sobre la misma base.
+
+base$text <- gsub("#\\w+","",base$text)
+base$text <- gsub("@\\w+","",base$text)
+base$text <- gsub("http.*","",base$text)
+base$text <- gsub("https.*","",base$text)
+base$text <- gsub("[[:punct:]]","",base$text)
+base$text <- gsub("\\w*[0-9]+\\w*\\s*", "",base$text)
+
+base %>% head()
+```
+
+Aprovechemos para mostrar una librería más: rVerbalExpressions! Este paquete opera como traductor entre lo que nosotros queremos y lo que R (o las regex en rigor) necesita. Por ejemplo, saquemos los RT.
+
+```{r}
+expresion <- rx() %>% 
+  rx_find('RT')
+
+expresion
+```
+
+```{r}
+base$text <- gsub(expresion, '', base$text)
+```
+
+```{r}
+base %>% head()
+```
+
+Aprovechemos y hagamos una más para sacar los escapes (enters).
+
+```{r}
+expresion2 <- rx() %>% 
+  rx_find('\n')
+
+expresion2
+```
+
+```{r}
+base$text <- gsub(expresion2, '', base$text)
+```
+
+```{r}
+base %>% head()
+```
+
+¡Mucho mejor! Acá viene un detalle para nada menor: al momento de preprocesar y sacar información, nosotros pedimos que los signos de puntuación, caracteres extraños y demás cuestiones sean eliminados mediante las regex. El tema es que eso nos dejó, con casi total seguridad, con tweets que no contienen información pero sí contienen datos. Es decir: no hay nada ahí que nos aporte información, pero va a haber "dato" que no es NA. Suena muy extraño, pero veamos lo que ocurre al sacar los tweets que cumplen con esta lógica.
+
+
+```{r}
+base_2 <- base %>% 
+  filter(text!='')
+```
+
+```{r}
+print(dim(base))
+print(dim(base_2))
+```
+
+Esos siete tweets que nos sacamos de encima son importantes porque al momento de armar el modelo iba a romper: se requiere que en cada documento (tweet) haya al menos una palabra.
+
+Ahora que tenemos cuáles son los tweets con los que en efecto vamos a trabajar, el próximo paso es armar un id para cada tweet: su número de documento con el cual se hará el document-term matrix.
+
+```{r}
+base_2 <- base_2 %>% 
+  mutate(id=as.numeric(rownames(.)))
+```
+
+¡Atención! La base original tiene un id, pero no nos aporta mucho en este momento. Si llegan a tener que usarlo, cámbienle el nombre. Esto es importante porque la construcción de la dtm requiere sí o sí que el conteo de documento se llame así.
+
+Ahora que ya tenemos la primera parte más o menos limpia, vamos a tokenizar y seguir limpiando, usando lo mismo que usamos antes.
+
+```{r}
+base_dtm <- base_2 %>%
+  unnest_tokens(input=text, output=word, token = 'tweets') %>% 
+  filter(!word%in%stopwords('es')) %>%
+  filter(!word%in%palabras_inutiles) %>%
+  filter(str_detect(word, "^[a-zA-z]"))%>%
+  filter(!str_detect(word, "^[http]"))%>%
+  count(id, word) %>% 
+  cast_dtm(document=id, term=word, value=n)
+```
+
+```{r}
+base_dtm
+```
+
+De más está decir que es una matriz sumamente rala. ¿Alguien nota algo en los documentos?
+
+En efecto, había más información que quedó afuera: por no contar con palabras, datos, cualquier otra posibilidad por la cual no hubo ningún documento con nada de lo cual agarrarse para establecer algo. No se preocupen que en el último paso vamos a quedarnos sólo con estos tweets útiles.
+
+Llegó el momento: ¡hagamos nuestro modelo! 
+
+```{r}
+base_lda <- LDA(base_dtm, #nuestro dtm
+                k = 2, #cantidad de grupos
+                method = "Gibbs", #método algorítmico
+                control = list(seed = 42, #reproducibilidad
+                               iter = 4000, #cantidad de iteraciones del modelo
+                               thin = 50, #selección de modelos (viene de C)
+                               burnin = 30, #cuantos descarta al principio
+                               alpha=0.5)) #reparto de las categorías (confianza de que es la etiqueta)
+```
+
+```{r}
+base_lda
+```
+
+Antes de proseguir, un paréntesis: tenemos la posibilidad de guardar los modelos y levantarlos en otro momento:
+
+```{r}
+#saveRDS(base_lda,'lda.rds')
+#base_lda <- read_rds('lda.rds')
+```
+
+Pudimos ver que el objeto es... un objeto. Algo que nosotros no podemos interpretar así como así (R sí). Veamos qué tiene adentro este objeto usando la función tidy.
+
+```{r}
+tidy(base_lda, 
+     'gamma') #matriz de probabilidad de que un documento pertenezca a un topic 
+```
+
+```{r}
+tidy(base_lda, 
+     'beta') #matriz de probabilidad de que una palabra pertenezca a un topic 
+```
+
+Acá ya vemos como se nos empiezan a desplegar las posibilidades para empezar a jugar y concatenar todas las técnicas que estudiamos en el taller. Pero por ahora, vamos al grano: tenemos la matriz gamma que nos dice la probabilidad de pertenencia. ¿Cómo usamos eso? 
+
+```{r}
+base_gamma <- tidy(base_lda, 'gamma') %>% #el proceso de ordenamiento
+  group_by(document) %>% #agrupamos por documento
+  slice(which.max(gamma)) #pedimos que devuelva sólo aquel que tenga mayor gamma de los dos
+
+base_gamma
+```
+
+El tweet en inglés (documento 1) nos está sirviendo para probar un punto maravilloso: ¡el algoritmo no tiene idea de dónde ponerlo! Claramente algo bien estamos haciendo.
+
+Al imprimir base_gamma vemos que el documento está como caracter: pasémoslo a numérico (sino no nos va a dejar hacer la fusión entre la base con los tópicos y sus probabilidades y la base original) y hagamos el left_join.
+
+```{r}
+base_gamma <- base_gamma %>% 
+  mutate(id=as.numeric(document))
+
+base_topics <- left_join(base_2, base_gamma)
+```
+
+Lo bueno del ID es que también nos sirve como criterio para ver cuáles son aquellos documentos en los cuales el algoritmo no pudo rescatar nada. Para eso, con un sencillo filtro podemos sacar todo aquello que no nos sea útil.
+
+```{r}
+base_topics2 <- base_topics %>% 
+  filter(!is.na(topic))
+```
+
+¿Qué tenemos ahora?
+
+```{r}
+base_topics2 %>% head()
+```
+
+Lo mismo que teníamos antes, pero con algunas variables más: podemos quedarnos sólo con algunas.
+
+```{r}
+base_topics_clean <- base_topics2 %>% 
+  select(text, topic, gamma, favorited, isRetweet, created)
+
+base_topics_clean %>% head()
+```
+
+¿Cómo quedó repartido?
+
+```{r}
+table(base_topics_clean$topic)
+```
+
+Entre las muchas cosas con las que podemos jugar a partir de ahora, una importante es el valor de gamma. Podemos quedarnos con sólo aquellos tweets cuyo gamma sea alto como para ratificar una confianza en el tono general del grupo.
+
+```{r}
+base_topics_clean2 <- base_topics_clean %>% 
+  filter(gamma>=0.9)
+
+table(base_topics_clean2$topic)
+```
+
+Cosas importantes: vemos que se mantuvo la proporción (el dos es mayoritario) aunque se agudizó un poco el peso hacia el segundo. Tengan en cuenta también que el valor del gamma depende directamente del valor de alpha al momento de fitear el modelo.
+
+De aquí en más es esencialmente lo mismo: tenemos dos bases de datos partidas a partir del resultado del algoritmo. Usando nuestro criterio analítico podemos ver si el valor de K estaba bien, si había que sacar algunas palabras que distorsionan el reparto (los nombres propios, por ejemplo), y todas las otras consideraciones.
+
+Esta metodología considera que cada tweet es un documento y a partir de eso hace todos los cálculos (beta para palabras, gamma para documentos). Pero, ¿qué pasa si queremos encontrar diferentes tópicos dentro de un único documento, como podría ser un libro o una entrevista?
+
+Acá volvemos al criterio heurístico. No hay una fórmula matemática, pero sí algunas guías e intuiciones. La idea es partir el texto en chunks lo suficientemente grandes para capturar temas o acontecimientos, pero tampoco tantos como para que haya reiteraciones. Es una decisión altamente subjetiva: por ejemplo, se usa 1000 palabras, que serían unas tres páginas en una novela. 
+
+¡Paréntesis y protip de viejo periodista! Existe una regla conocida en el ámbito de la locución: "4 x 40 = 10". Esto quiere decir que cuatro líneas de 40 caracteres equivalen a 10 segundos de narración. Esta es la velocidad "sugerida" de lectura y es un promedio... el desvío estándar lo calculamos otro día.
+
+Cuando tenés los capítulos de un libro es fácil: cada capítulo sería una fila en el dtm. Con los text chunks eso lo tenés que generar/encontrar vos. Una posible manera sería usar %/%, división por enteros, para partir a cada X palabras. Para eso, tenés que hacer unnest tokens, asignar un número secuencial a cada palabra y computar el número.
+
+Veámoslo en práctica. Levantamos el discurso de Alberto Fernández, con una ventana de 500 palabras.
+
+```{r}
+discurso <- read.delim('../Datasets/discurso_af.txt', header = F) %>% 
+  rename('text'=V1) %>% #pequeños detalles parte 1
+  mutate(text=as.character(text)) #pequeños detalles parte 2
+```
+
+Vamos a ir paso a paso. Primero, hacemos el unnest_tokens y generamos un índice de palabra: es decir, qué número de palabra es de todo el documento.
+
+```{r}
+discurso %>% 
+   unnest_tokens(input=text, output=word) %>%
+   mutate(word_index = 1:n())
+```
+
+Apliquemos la famosa división por enteros. La suma de 1 es porque sino el primer capítulo sería con un valor 0.
+
+```{r}
+discurso %>% 
+   unnest_tokens(input=text, output=word) %>%
+   mutate(word_index = 1:n()) %>% 
+   mutate(doc_number = word_index %/% 500 + 1)
+```
+
+¡Ahora es volver a lo mismo que ya vimos1
+
+```{r}
+discurso %>% 
+   unnest_tokens(input=text, output=word) %>%
+   mutate(word_index = 1:n()) %>% 
+   mutate(doc_number = word_index %/% 500 + 1) %>%
+   filter(!word%in%stopwords('es')) %>%
+   filter(!word%in%palabras_inutiles) %>%
+   filter(str_detect(word, "^[a-zA-z]"))%>%
+   count(doc_number, word) %>% 
+   cast_dtm(term=word, document=doc_number, value=n)
+```
+
+```{r}
+discurso_dtm <- discurso %>% 
+   unnest_tokens(input=text, output=word) %>%
+   mutate(word_index = 1:n()) %>% 
+   mutate(doc_number = word_index %/% 500 + 1) %>%
+   filter(!word%in%stopwords('es')) %>%
+   filter(!word%in%palabras_inutiles) %>%
+   filter(str_detect(word, "^[a-zA-z]"))%>%
+   count(doc_number, word) %>% 
+   cast_dtm(term=word, document=doc_number, value=n)
+```
+
+Aprovechemos a dejar otro enfoque posible: podemos ver cuáles son las palabras más nombradas en este dtm...
+
+```{r}
+frecuencia = colSums(as.matrix(discurso_dtm))
+frecuencia
+```
+
+... ordenar todo en orden decreciente y usar un pequeño truco de R base para obtener un listado de, por ejemplo, las 20 palabras más frecuentes.
+
+```{r}
+ord = order(frecuencia, decreasing = TRUE)
+frecuencia[head(ord, n = 20)]
+```
+
+Con esta información, podemos usar la función findAssocs de tm para ver algunas correlaciones. Más allá de que claramente "Argentina" es una palabra que no nos dice nada y podríamos haber limpiado más todo, es una buena manera de detectar algunas cosas, como por ejemplo...
+
+```{r}
+findAssocs(discurso_dtm, "democracia", 0.8)
+```
+
+... las palabras con las que más se relaciona un determinado término a partir de un determinado coeficiente. ¡Interesante!
+
+Ahora sí, vamos a armar el modelo:
+
+```{r}
+discurso_lda <- LDA(discurso_dtm, #nuestro dtm
+                k = 3, #cantidad de grupos
+                method = "Gibbs", #método algorítmico
+                control = list(seed = 42, #reproducibilidad
+                               iter = 4000, #cantidad de iteraciones del modelo
+                               thin = 50, #selección de modelos (viene de C)
+                               burnin = 30, #cuantos descarta al principio
+                               alpha=0.5)) #reparto de las categorías (confianza de que es la etiqueta)
+```
+
+Acá podemos aplicar otras de las técnicas que nos da topicmodels, como por ejemplo "terms".
+
+```{r}
+as.matrix(terms(discurso_lda,10))
+```
